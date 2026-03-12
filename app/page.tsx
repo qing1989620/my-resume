@@ -7,26 +7,24 @@ export default function Home() {
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   
-  // 新增：控制是否处于“编辑模式”的开关
   const [isEditing, setIsEditing] = useState(false);
+
+  // --- 新增：软著同步演示的状态 ---
+  const [syncInput, setSyncInput] = useState('');
+  const [syncResult, setSyncResult] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const handleLogin = async () => {
     if (password === '888888') {
       setLoading(true);
-      
-      // 先看看浏览器本地有没有你之前修改保存过的数据
       const savedData = localStorage.getItem('myResumeData');
-      
       if (savedData) {
-        // 如果有本地保存的，就用本地的
         setProfile(JSON.parse(savedData));
       } else {
-        // 如果没有，就去后端拿默认的
         const res = await fetch('/api/profile');
         const data = await res.json();
         setProfile(data);
       }
-      
       setIsUnlocked(true);
       setLoading(false);
     } else {
@@ -34,15 +32,46 @@ export default function Home() {
     }
   };
 
-  // 新增：保存修改的功能
   const handleSave = () => {
-    // 把当前修改好的数据，像存盘一样存进浏览器的记忆里
     localStorage.setItem('myResumeData', JSON.stringify(profile));
-    setIsEditing(false); // 退出编辑模式
-    alert('保存成功！(目前数据保存在本地浏览器缓存中)');
+    setIsEditing(false);
+    alert('保存成功！');
   };
 
-  // --- 1. 密码登录大门 (保持不变) ---
+  // --- 新增：向 Python 后端发送同步请求的魔法函数 ---
+  const handleSyncToPython = async () => {
+    if (!syncInput) return alert('请先输入一点离线笔记！');
+    setIsSyncing(true);
+    setSyncResult('正在连接 Python 云端服务器...');
+
+    try {
+      // 向你本地的 Python FastAPI 发送 POST 请求
+      const response = await fetch('http://127.0.0.1:8000/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: "doc_energy_001",
+          title: "能源经济大赛记录",
+          content: syncInput,
+          updated_at: Date.now() / 1000 // 获取当前时间戳
+        })
+      });
+
+      const data = await response.json();
+      
+      // 把 Python 后端处理好的合并数据展示出来
+      if (data.status === 'merged') {
+        setSyncResult(`⚠️ 触发智能合并！\n\n最终云端数据：\n${data.final_data.content}`);
+      } else {
+        setSyncResult(`✅ 推送成功！\n\n最终云端数据：\n${data.final_data.content}`);
+      }
+    } catch (error) {
+      setSyncResult('❌ 连接后端失败，请确保你的 Python FastAPI 服务器正在运行 (端口 8000)。');
+    }
+    setIsSyncing(false);
+  };
+
+  // --- 1. 密码登录大门 ---
   if (!isUnlocked) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
@@ -53,7 +82,7 @@ export default function Home() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="bg-white/20 border border-white/30 p-3 w-full my-6 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 text-white placeholder-gray-300 text-center tracking-widest"
-            placeholder="输入密码"
+            placeholder="请输入访问密码"
           />
           <button onClick={handleLogin} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 w-full rounded-lg shadow-lg">
             {loading ? '加载中...' : '进入主页'}
@@ -66,88 +95,84 @@ export default function Home() {
   // --- 2. 可编辑的高端主页 ---
   return (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8 relative">
-      
-      {/* 悬浮的编辑/保存控制台 */}
       <div className="fixed top-4 right-4 z-50 bg-white p-4 rounded-xl shadow-2xl border border-gray-200 flex gap-4">
         {isEditing ? (
-          <button onClick={handleSave} className="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-lg font-bold shadow transition-colors">
-            💾 保存修改
-          </button>
+          <button onClick={handleSave} className="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-lg font-bold shadow transition-colors">💾 保存修改</button>
         ) : (
-          <button onClick={() => setIsEditing(true)} className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg font-bold shadow transition-colors">
-            ✏️ 编辑简历
-          </button>
+          <button onClick={() => setIsEditing(true)} className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg font-bold shadow transition-colors">✏️ 编辑简历</button>
         )}
       </div>
 
       <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
-        
-        {/* 左侧：可编辑的资料卡 */}
+        {/* 左侧：资料卡 */}
         <div className="md:col-span-1">
           <div className="bg-white rounded-2xl shadow-xl overflow-hidden sticky top-8">
             <div className="bg-gradient-to-r from-blue-500 to-purple-600 h-32"></div>
             <div className="px-6 pb-8 text-center -mt-16">
               <img src={profile.basicInfo.avatar} alt="Avatar" className="w-32 h-32 rounded-full border-4 border-white mx-auto shadow-lg bg-white mb-4" />
-              
-              {/* 如果是编辑模式，显示输入框；如果是预览模式，显示文本 */}
               {isEditing ? (
                 <div className="space-y-3 mt-4">
-                  <input 
-                    className="w-full text-center border-b-2 border-blue-400 focus:outline-none text-xl font-bold text-gray-800"
-                    value={profile.basicInfo.name}
-                    onChange={(e) => setProfile({...profile, basicInfo: {...profile.basicInfo, name: e.target.value}})}
-                  />
-                  <div className="flex justify-center items-center text-gray-500 gap-2">
-                    <input 
-                      type="number"
-                      className="w-16 text-center border-b border-gray-400 focus:outline-none"
-                      value={profile.basicInfo.age}
-                      onChange={(e) => setProfile({...profile, basicInfo: {...profile.basicInfo, age: Number(e.target.value)}})}
-                    /> 岁
-                  </div>
-                  <input 
-                    className="w-full text-center border-b border-gray-400 focus:outline-none text-gray-500 text-sm"
-                    value={profile.basicInfo.email}
-                    onChange={(e) => setProfile({...profile, basicInfo: {...profile.basicInfo, email: e.target.value}})}
-                  />
-                  <textarea 
-                    className="w-full text-center border border-gray-300 rounded p-2 focus:outline-none text-gray-600 text-sm mt-2"
-                    value={profile.basicInfo.motto}
-                    onChange={(e) => setProfile({...profile, basicInfo: {...profile.basicInfo, motto: e.target.value}})}
-                  />
+                  <input className="w-full text-center border-b-2 border-blue-400 focus:outline-none text-xl font-bold text-gray-800" value={profile.basicInfo.name} onChange={(e) => setProfile({...profile, basicInfo: {...profile.basicInfo, name: e.target.value}})} />
                 </div>
               ) : (
                 <>
                   <h1 className="text-2xl font-bold text-gray-800 mt-4">{profile.basicInfo.name}</h1>
                   <p className="text-gray-500 font-medium">{profile.basicInfo.age} 岁 | {profile.basicInfo.email}</p>
-                  <p className="text-gray-600 mt-4 italic">"{profile.basicInfo.motto}"</p>
                 </>
               )}
             </div>
           </div>
         </div>
 
-        {/* 右侧：履历模块 (为了演示简洁，这部分暂时保持原样，你可以照猫画虎自己加上编辑框) */}
+        {/* 右侧：履历与硬核技术演示 */}
         <div className="md:col-span-2 space-y-8">
+          
+          {/* 简历项目模块 */}
           <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
             <h2 className="text-2xl font-extrabold text-gray-800 mb-6 flex items-center">
-              <span className="w-2 h-8 bg-blue-500 rounded-full mr-3"></span>项目经验 (预览)
+              <span className="w-2 h-8 bg-green-500 rounded-full mr-3"></span>核心软著：多端知识协同与离线同步系统
             </h2>
-            <div className="space-y-8">
-              {profile.projects.map((project: any, index: number) => (
-                <div key={index} className="relative pl-6 border-l-2 border-gray-200">
-                  <span className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-white border-4 border-blue-500"></span>
-                  <div className="flex justify-between items-baseline mb-1">
-                    <h3 className="text-lg font-bold text-gray-800">{project.name}</h3>
-                    <span className="text-sm text-gray-500 font-medium">{project.role}</span>
-                  </div>
-                  <p className="text-gray-600 mt-2 leading-relaxed">{project.desc}</p>
+            <p className="text-gray-600 leading-relaxed mb-4">
+              <strong>核心亮点：</strong>解决跨端工具数据不同步痛点，支持断网状态下的知识库编辑。联网后自动触发增量同步，并基于操作优先级和时间戳执行<strong>智能冲突解决策略</strong>。
+            </p>
+            
+            {/* 🔴 互动演示区 🔴 */}
+            <div className="bg-gray-900 rounded-xl p-6 shadow-inner border border-gray-700">
+              <h3 className="text-white font-bold mb-3 flex items-center gap-2">
+                📡 互动演示：模拟断网重连与冲突合并
+              </h3>
+              <p className="text-gray-400 text-sm mb-4">
+                假设另一台电脑刚刚在云端修改了《能源经济大赛记录》。现在，请在下方输入你“离线”状态下写的笔记，点击同步，体验云端的智能合并：
+              </p>
+              
+              <textarea
+                className="w-full h-24 bg-gray-800 text-green-400 p-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 font-mono text-sm mb-4 placeholder-gray-600"
+                placeholder="在此输入你断网时写的灵感（例如：需要增加基于 YOLO 的检测结果图表）..."
+                value={syncInput}
+                onChange={(e) => setSyncInput(e.target.value)}
+              />
+              
+              <button 
+                onClick={handleSyncToPython}
+                disabled={isSyncing}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded shadow transition-all disabled:opacity-50"
+              >
+                {isSyncing ? '🚀 数据传输中...' : '🚀 模拟联网，一键同步'}
+              </button>
+
+              {/* 结果展示屏 */}
+              {syncResult && (
+                <div className="mt-6 bg-black p-4 rounded-lg border border-gray-700">
+                  <h4 className="text-gray-400 text-xs uppercase tracking-widest mb-2">云端服务器返回结果：</h4>
+                  <pre className="text-yellow-400 font-mono text-sm whitespace-pre-wrap">
+                    {syncResult}
+                  </pre>
                 </div>
-              ))}
+              )}
             </div>
+            
           </div>
         </div>
-
       </div>
     </div>
   );
