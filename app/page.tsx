@@ -1,276 +1,337 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 
-// --- ☁️ 云端大脑地址配置 (在此处填入你的 Hugging Face 网址) ---
-const API_BASE_URL = "https://qing2976-resume-ai-api.hf.space"; 
+// --- ☁️ 全局配置：请确保此地址指向你的 Python 后端 ---
+const API_BASE_URL = "http://127.0.0.1:8000";
 
-export default function Home() {
-  const [password, setPassword] = useState('');
-  const [isUnlocked, setIsUnlocked] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
+export default function Dashboard() {
+  // --- [1] 核心路由与弹窗状态 ---
+  const [activeNav, setActiveNav] = useState('discover');
+  const [activeSubNav, setActiveSubNav] = useState('recommend');
+  const [selectedNote, setSelectedNote] = useState<any>(null); // 存储当前点击的笔记详情
 
-  // --- 简历基本数据 ---
-  const [profile, setProfile] = useState({
-    basicInfo: {
-      name: "全栈开发者 & 算法工程师",
-      age: 23,
-      email: "your.email@example.com",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"
+  // --- 🆕 知识节点编辑器状态 ---
+  const [showEditor, setShowEditor] = useState(false);
+  const [noteForm, setNoteForm] = useState({ title: '', content: '', tags: '', image_url: '' });
+
+  // 提交到后端的逻辑
+  const handleSubmitNote = async () => {
+    if (!noteForm.title || !noteForm.content) return alert("标题和内容是必填的哦！");
+    
+    // 组装符合后端要求的数据格式
+    const newNote = {
+      id: "node_" + Date.now(),
+      title: noteForm.title,
+      content: noteForm.content,
+      tags: noteForm.tags.split(',').map(t => t.trim()).filter(t => t),
+      image_url: noteForm.image_url || null,
+      updated_at: Date.now() / 1000
+    };
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newNote)
+      });
+      if (res.ok) {
+        setShowEditor(false); 
+        setNoteForm({ title: '', content: '', tags: '', image_url: '' }); 
+        fetchNotes(); 
+      }
+    } catch (error) {
+      console.error("同步失败:", error);
+      alert("无法连接到后端，请检查 uvicorn 是否运行。");
     }
-  });
+  };
 
-  // --- 软著同步演示状态 ---
-  const [syncInput, setSyncInput] = useState('');
-  const [syncResult, setSyncResult] = useState('');
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  // --- 知识库与对话状态 ---
+  // --- [2] 知识库数据状态 ---
   const [notes, setNotes] = useState<any[]>([]);
-  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // --- [3] 个人资料状态 ---
+  const [profile, setProfile] = useState({
+    name: '刘祥',
+    role: '科研人员', 
+    level: 7,
+    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
+    nodeCount: 128,
+    sceneCount: 15
+  });
+  
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editForm, setEditForm] = useState(profile);
+
+  const handleSaveProfile = () => {
+    setProfile(editForm);
+    setIsEditingProfile(false);
+  };
+
+  // --- [4] 检索/问答状态 ---
   const [chatInput, setChatInput] = useState('');
-  const [chatMessages, setChatMessages] = useState([
-    { role: 'ai', content: '你好！我是你的专属知识库 AI 助手。随时可以问我关于你笔记的任何问题，未来我将接入 Dify 智能体大模型！' }
+  const [chatHistory, setChatHistory] = useState([
+    { role: 'ai', content: '智见检索引擎已就绪。请输入关键词，我将为您精准定位本地知识库。' }
   ]);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // 笔记详情弹窗状态
-  const [selectedNote, setSelectedNote] = useState<any>(null);
-
-  // 登录逻辑
-  const handleLogin = async () => {
-    if (password === '888888') {
-      setLoading(true);
-      const savedData = localStorage.getItem('myResumeData');
-      if (savedData) setProfile(JSON.parse(savedData));
-      setIsUnlocked(true);
-      setLoading(false);
-      fetchNotes();
-    } else {
-      alert('密码错误，请重新输入！');
-    }
-  };
-
-  const handleSave = () => {
-    localStorage.setItem('myResumeData', JSON.stringify(profile));
-    setIsEditing(false);
-    alert('保存成功！');
-  };
-
-  // ☁️ 拉取云端知识库数据
+  // --- [5] 数据交互逻辑 ---
   const fetchNotes = async () => {
+    setLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/notes`);
       const data = await res.json();
       setNotes(data.notes);
     } catch (error) {
-      console.error('拉取知识库失败:', error);
+      console.error("无法连接后端服务器:", error);
     }
+    setLoading(false);
   };
 
-  // ☁️ 发送同步请求
-  const handleSyncToPython = async () => {
-    if (!syncInput) return alert('请先输入一点离线笔记！');
-    setIsSyncing(true);
-    setSyncResult('正在连接云端 AI 服务器...');
+  useEffect(() => {
+    fetchNotes();
+  }, []);
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: "doc_" + Date.now(),
-          title: "离线随记 - " + new Date().toLocaleTimeString(),
-          content: syncInput,
-          updated_at: Date.now() / 1000
-        })
-      });
-
-      const data = await response.json();
-      setSyncResult(data.status === 'merged' ? `⚠️ 触发合并！\n${data.final_data.content}` : `✅ 推送成功！\n${data.final_data.content}`);
-      fetchNotes();
-      setSyncInput('');
-    } catch (error) {
-      setSyncResult('❌ 连接云端失败，请检查 Hugging Face 空间状态。');
-    }
-    setIsSyncing(false);
-  };
-
-  // ☁️ 智能体对话功能
-  const handleSendMessage = async () => {
+  const handleSendChat = async () => {
     if (!chatInput.trim()) return;
-    const newMessages = [...chatMessages, { role: 'user', content: chatInput }];
-    setChatMessages(newMessages);
+    const userMsg = { role: 'user', content: chatInput };
+    setChatHistory(prev => [...prev, userMsg]);
     setChatInput('');
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: chatInput })
+        body: JSON.stringify({ query: chatInput })
       });
       const data = await response.json();
-      setChatMessages([...newMessages, { role: 'ai', content: data.reply }]);
+      setChatHistory(prev => [...prev, { role: 'ai', content: data.reply }]);
     } catch (error) {
-      setChatMessages([...newMessages, { role: 'ai', content: '❌ 无法连接到 AI 大脑。' }]);
+      setChatHistory(prev => [...prev, { role: 'ai', content: '❌ 无法连接到本地搜索引擎。' }]);
     }
   };
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages, isChatOpen]);
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory]);
 
-  // --- 1. 登录页 ---
-  if (!isUnlocked) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900">
-        <div className="p-10 bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl w-96 text-center">
-          <h1 className="text-3xl font-bold mb-6 text-white tracking-wider">私密空间</h1>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleLogin()} className="bg-black/50 border border-gray-600 p-3 w-full mb-6 rounded-lg text-white text-center focus:border-blue-500 outline-none tracking-widest" placeholder="请输入密码,殿下" />
-          <button onClick={handleLogin} className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 w-full rounded-lg transition-colors">进入智能系统</button>
-        </div>
-      </div>
-    );
-  }
-
-  // --- 2. 主页 ---
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-8 relative selection:bg-blue-200 pb-32">
-      <div className="max-w-7xl mx-auto flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">AI 知识协同工作站</h1>
-        {isEditing ? (
-          <button onClick={handleSave} className="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-xl font-bold shadow-lg transition-all">💾 保存资料</button>
-        ) : (
-          <button onClick={() => setIsEditing(true)} className="bg-gray-800 hover:bg-gray-700 text-white px-6 py-2 rounded-xl font-bold shadow-lg transition-all">✏️ 编辑基本信息</button>
-        )}
-      </div>
-
-      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-12 gap-8">
-        <div className="md:col-span-4 space-y-6">
-          <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-100 p-6 text-center">
-            <img src={profile.basicInfo.avatar} alt="Avatar" className="w-24 h-24 rounded-full mx-auto shadow-md mb-4 border-2 border-blue-100" />
-            {isEditing ? (
-              <div className="space-y-3">
-                <input className="w-full text-center border-b focus:border-blue-500 outline-none text-xl font-bold" value={profile.basicInfo.name} onChange={(e) => setProfile({...profile, basicInfo: {...profile.basicInfo, name: e.target.value}})} />
-              </div>
-            ) : (
-              <>
-                <h2 className="text-2xl font-bold text-gray-900">{profile.basicInfo.name}</h2>
-                <p className="text-gray-500 text-sm mt-2">{profile.basicInfo.age} 岁 | {profile.basicInfo.email}</p>
-              </>
-            )}
-          </div>
-
-          <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-6 h-[500px] flex flex-col">
-            <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-              📚 云端笔记本
-              <button onClick={fetchNotes} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-gray-600 ml-auto">同步云端</button>
-            </h3>
-            <div className="overflow-y-auto flex-1 space-y-4 pr-2">
-              {notes.length === 0 ? (
-                <p className="text-gray-400 text-sm text-center mt-10">知识库为空，请同步录入笔记。</p>
-              ) : (
-                notes.map((note) => (
-                  <div key={note.id} onClick={() => setSelectedNote(note)} className="bg-gray-50 border border-gray-100 rounded-xl p-4 hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group">
-                    <div className="flex justify-between items-start mb-1">
-                      <h4 className="font-bold text-gray-800 text-sm group-hover:text-blue-600 transition-colors">{note.title}</h4>
-                      <span className="text-[10px] text-gray-400">🔍</span>
-                    </div>
-                    <p className="text-xs text-gray-500 line-clamp-2 mb-3">{note.content}</p>
-                    <div className="flex flex-wrap gap-1">
-                      {note.tags && note.tags.map((tag: string, idx: number) => (
-                        <span key={idx} className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded text-[10px] font-bold border border-blue-100">{tag}</span>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              )}
+    <div className="min-h-screen bg-[#F5F5F5] font-sans text-[#333333] selection:bg-[#C20C0C]/10">
+      
+      {/* ⬛ 一级导航栏 */}
+      <header className="bg-[#242424] h-16 w-full min-w-[1024px] sticky top-0 z-50 shadow-xl">
+        <div className="max-w-[1100px] mx-auto h-full flex items-center justify-between px-4">
+          <div className="flex items-center h-full">
+            <div className="text-white text-xl font-normal tracking-widest mr-8 flex items-center">
+              <div className="w-6 h-6 rounded-full border-4 border-white mr-2"></div>
+              SCENE KNOWLEDGE
             </div>
-          </div>
-        </div>
-
-        <div className="md:col-span-8 space-y-8">
-          <div className="bg-gray-900 rounded-3xl p-8 shadow-2xl border border-gray-800 text-white">
-            <h2 className="text-2xl font-bold flex items-center gap-3 mb-2">
-              <span className="w-3 h-8 bg-blue-500 rounded-lg"></span>多端协同同步录入端
-            </h2>
-            <textarea
-              className="w-full h-28 bg-black/50 text-green-400 p-4 rounded-xl border border-gray-700 focus:border-blue-500 outline-none font-mono text-sm mb-4 resize-none"
-              placeholder="在此录入笔记，将实时推送到云端 AI 空间..."
-              value={syncInput}
-              onChange={(e) => setSyncInput(e.target.value)}
-            />
-            <button onClick={handleSyncToPython} disabled={isSyncing} className="bg-blue-600 hover:bg-blue-500 font-bold py-3 px-8 rounded-xl transition-all disabled:opacity-50">
-              {isSyncing ? '同步中...' : '🚀 推送到云端空间'}
-            </button>
-            {syncResult && <div className="mt-4 text-yellow-400 font-mono text-xs whitespace-pre-wrap bg-black/40 p-3 rounded-lg border border-gray-700">{syncResult}</div>}
-          </div>
-
-          <div className="bg-white p-8 rounded-3xl shadow-lg border border-gray-100">
-            <h2 className="text-2xl font-extrabold text-gray-900 mb-6 flex items-center">
-              <span className="w-3 h-8 bg-purple-600 rounded-lg mr-4"></span>算法与大数据实战
-            </h2>
-            <div className="space-y-6">
-              <div className="border-l-4 border-purple-500 pl-4">
-                <h3 className="font-bold text-gray-800 text-lg">基于 YOLO 架构的缺陷检测算法研发</h3>
-                <p className="text-gray-600 text-sm mt-2">引入高斯羽化合成技术提升模型鲁棒性与边界识别精度。</p>
-              </div>
-              <div className="border-l-4 border-blue-500 pl-4">
-                <h3 className="font-bold text-gray-800 text-lg">长沙十年空气质量数据挖掘与可视化</h3>
-                <p className="text-gray-600 text-sm mt-2">使用 Python 处理海量环境数据，产出学术期刊标准的高级可视化图表。</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {selectedNote && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <h2 className="text-xl font-bold text-gray-800">{selectedNote.title}</h2>
-              <button onClick={() => setSelectedNote(null)} className="text-gray-400 hover:text-red-500 bg-white rounded-full p-2">✕</button>
-            </div>
-            <div className="p-6 overflow-y-auto flex-1">
-              <div className="flex flex-wrap gap-2 mb-6 border-b pb-4 text-xs text-gray-400">
-                {selectedNote.tags && selectedNote.tags.map((tag: string, idx: number) => (
-                  <span key={idx} className="bg-blue-50 text-blue-600 px-3 py-1 rounded-md font-bold">{tag}</span>
-                ))}
-                <span className="ml-auto">更新于: {new Date(selectedNote.updated_at * 1000).toLocaleString()}</span>
-              </div>
-              <div className="text-gray-700 leading-relaxed whitespace-pre-wrap font-medium">{selectedNote.content}</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end">
-        {isChatOpen && (
-          <div className="bg-white w-80 sm:w-96 rounded-2xl shadow-2xl border border-gray-200 mb-4 overflow-hidden flex flex-col" style={{ height: '450px' }}>
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-4 text-white flex justify-between items-center">
-              <div className="font-bold">🤖 专属知识库 AI</div>
-              <button onClick={() => setIsChatOpen(false)}>✕</button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 text-sm">
-              {chatMessages.map((msg, idx) => (
-                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] p-3 rounded-2xl ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white text-gray-800 border border-gray-200 rounded-tl-none'}`}>
-                    {msg.content}
-                  </div>
+            <nav className="flex h-full text-[#CCCCCC] text-[14px]">
+              {['discover', 'mine', 'scenario', 'ai'].map((nav) => (
+                <div 
+                  key={nav}
+                  className={`px-6 h-full flex items-center cursor-pointer transition-all ${activeNav === nav ? 'bg-black text-white' : 'hover:bg-[#333333]'}`}
+                  onClick={() => setActiveNav(nav)}
+                >
+                  {nav === 'discover' && '发现知识'}
+                  {nav === 'mine' && '我的图谱'}
+                  {nav === 'scenario' && '场景任务'}
+                  {nav === 'ai' && '智能溯源'}
                 </div>
               ))}
-              <div ref={messagesEndRef} />
+            </nav>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right text-white mr-2">
+              <p className="text-[12px]">{profile.name}</p>
+              <p className="text-[10px] opacity-60 uppercase">{profile.role}</p>
             </div>
-            <div className="p-3 bg-white border-t flex gap-2">
-              <input type="text" className="flex-1 bg-gray-100 rounded-full px-4 py-2 text-sm focus:outline-none" placeholder="提问..." value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} />
-              <button onClick={handleSendMessage} className="bg-blue-600 text-white w-9 h-9 rounded-full flex items-center justify-center">↑</button>
+            <img src={profile.avatar} className="w-8 h-8 rounded-full border border-gray-600" />
+          </div>
+        </div>
+      </header>
+
+      {/* 🏛️ 主内容布局 */}
+      <main className="max-w-[980px] mx-auto bg-white min-h-[900px] border-x border-[#D3D3D3] flex relative">
+        
+        <div className="w-[730px] p-8 border-r border-[#D3D3D3]">
+          {activeNav === 'discover' && (
+            <div className="animate-in fade-in duration-500">
+              <div className="flex justify-between items-end border-b-2 border-[#C20C0C] pb-2 mb-8">
+                <h2 className="text-2xl font-normal flex items-center gap-3">
+                  <div className="w-4 h-4 rounded-full bg-[#C20C0C]"></div>
+                  {activeSubNav === 'morning' ? '今日晨报' : '个性化推荐'}
+                </h2>
+                <button onClick={fetchNotes} className="text-[12px] text-blue-600 hover:underline">刷新图谱</button>
+              </div>
+
+              <div className="grid grid-cols-4 gap-6">
+                {notes.map((note) => (
+                  <div 
+                    key={note.id} 
+                    className="group cursor-pointer" 
+                    onClick={() => setSelectedNote(note)}
+                  >
+                    <div className="w-full aspect-square bg-[#F3F4F6] border border-[#E5E5E5] relative overflow-hidden group-hover:shadow-lg transition-all">
+                      {note.image_url ? (
+                        <img src={note.image_url} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[#CCC] text-[10px] font-mono">DOC_NODE</div>
+                      )}
+                    </div>
+                    <p className="mt-2 text-[13px] font-medium group-hover:text-[#C20C0C] line-clamp-2">{note.title}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeNav === 'ai' && (
+            <div className="h-full flex flex-col animate-in fade-in">
+              <div className="border-b-2 border-[#C20C0C] pb-2 mb-6">
+                <h2 className="text-2xl font-normal">本地知识检索控制台</h2>
+              </div>
+              <div className="flex-1 bg-[#F9F9F9] border border-[#D9D9D9] flex flex-col min-h-[500px]">
+                <div className="flex-1 p-6 overflow-y-auto space-y-4">
+                  {chatHistory.map((msg, i) => (
+                    <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[85%] p-3 text-[13px] whitespace-pre-wrap ${msg.role === 'user' ? 'bg-[#333] text-white' : 'bg-white border'}`}>
+                        {msg.content}
+                      </div>
+                    </div>
+                  ))}
+                  <div ref={chatEndRef} />
+                </div>
+                <div className="p-4 bg-white border-t">
+                  <textarea 
+                    className="w-full h-20 resize-none outline-none text-[13px]" 
+                    placeholder="输入关键词进行搜索..."
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleSendChat())}
+                  />
+                  <div className="flex justify-end mt-2">
+                    <button onClick={handleSendChat} className="bg-[#C20C0C] text-white px-6 py-1.5 text-[12px]">立即检索</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 右侧边栏 */}
+        <div className="w-[250px] bg-[#FAFAFA]">
+          <div className="p-6 text-center border-b">
+             <img src={profile.avatar} className="w-20 h-20 mx-auto border p-1 bg-white mb-4" />
+             <h3 className="font-bold">{profile.name}</h3>
+             <p className="text-xs text-gray-500 mt-1">{profile.role}</p>
+             <button onClick={() => setIsEditingProfile(true)} className="mt-4 text-[10px] border px-2 py-1 hover:bg-white">编辑资料</button>
+             
+             {/* 🌟 核心升级：录入知识按钮 */}
+             <button 
+               onClick={() => setShowEditor(true)} 
+               className="w-full mt-6 bg-[#C20C0C] text-white text-[13px] py-2 font-bold shadow-md hover:bg-[#A30A0A] transition-colors"
+             >
+               ＋ 录入新知识节点
+             </button>
+          </div>
+          
+          {isEditingProfile && (
+            <div className="p-4 bg-white shadow-lg m-2 border animate-in fade-in">
+              <input className="w-full border p-1 text-xs mb-2 outline-none focus:border-[#C20C0C]" placeholder="昵称" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} />
+              <input className="w-full border p-1 text-xs mb-2 outline-none focus:border-[#C20C0C]" placeholder="身份标签" value={editForm.role} onChange={e => setEditForm({...editForm, role: e.target.value})} />
+              <button onClick={handleSaveProfile} className="w-full bg-[#333] text-white text-xs py-1 hover:bg-black">保存修改</button>
+            </div>
+          )}
+        </div>
+
+        {/* 🌟 核心升级 1：详情预览弹窗 */}
+        {selectedNote && (
+          <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setSelectedNote(null)}>
+            <div className="bg-white w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded shadow-2xl relative animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+              <button onClick={() => setSelectedNote(null)} className="absolute top-4 right-4 text-gray-400 hover:text-black text-2xl">×</button>
+              
+              {selectedNote.image_url && (
+                <div className="w-full bg-[#f0f0f0] border-b">
+                  <img src={selectedNote.image_url} className="w-full h-auto max-h-[400px] object-contain mx-auto" alt="预览图" />
+                </div>
+              )}
+
+              <div className="p-8">
+                <div className="flex items-center gap-2 mb-6">
+                  <span className="bg-[#C20C0C] text-white text-[10px] px-2 py-0.5 uppercase tracking-tighter">Knowledge Node</span>
+                  <h2 className="text-2xl font-bold text-[#333]">{selectedNote.title}</h2>
+                </div>
+                <div className="text-[14px] leading-relaxed text-[#555] whitespace-pre-wrap border-t pt-6">
+                  {selectedNote.content}
+                </div>
+                <div className="mt-10 pt-4 border-t border-dashed flex justify-between text-[11px] text-[#999]">
+                  <span>同步于：{new Date(selectedNote.updated_at * 1000).toLocaleString()}</span>
+                  <span>来源：私有知识库 (SQLite)</span>
+                </div>
+              </div>
             </div>
           </div>
         )}
-        <button onClick={() => setIsChatOpen(!isChatOpen)} className="bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-full shadow-2xl transition-transform hover:scale-110 border-4 border-white">
-          {isChatOpen ? '收起' : '唤醒 AI'}
-        </button>
-      </div>
+
+        {/* 🌟 核心升级 2：知识录入/编辑弹窗 */}
+        {showEditor && (
+          <div className="fixed inset-0 bg-black/60 z-[110] flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setShowEditor(false)}>
+            <div className="bg-white w-full max-w-lg rounded shadow-2xl p-6 animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+              <h2 className="text-xl font-bold border-b pb-3 mb-4 flex items-center gap-2">
+                <div className="w-3 h-3 bg-[#C20C0C]"></div> 撰写知识节点
+              </h2>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[12px] font-bold text-[#666] mb-1 block">节点标题 *</label>
+                  <input 
+                    className="w-full border border-[#D9D9D9] p-2 text-[13px] outline-none focus:border-[#C20C0C]" 
+                    placeholder="例如：YOLO 缺陷检测最新调参心得"
+                    value={noteForm.title} onChange={e => setNoteForm({...noteForm, title: e.target.value})}
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-[12px] font-bold text-[#666] mb-1 block">深度内容 *</label>
+                  <textarea 
+                    className="w-full border border-[#D9D9D9] p-2 text-[13px] h-32 resize-none outline-none focus:border-[#C20C0C]" 
+                    placeholder="记录你的发现、代码片段或理论推导..."
+                    value={noteForm.content} onChange={e => setNoteForm({...noteForm, content: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[12px] font-bold text-[#666] mb-1 block">场景标签 (用逗号分隔)</label>
+                  <input 
+                    className="w-full border border-[#D9D9D9] p-2 text-[13px] outline-none focus:border-[#C20C0C]" 
+                    placeholder="如：CV, 数据可视化, 长沙"
+                    value={noteForm.tags} onChange={e => setNoteForm({...noteForm, tags: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[12px] font-bold text-[#666] mb-1 block">关联多模态资源 (图片 URL)</label>
+                  <input 
+                    className="w-full border border-[#D9D9D9] p-2 text-[13px] outline-none focus:border-[#C20C0C]" 
+                    placeholder="例如你的图床链接..."
+                    value={noteForm.image_url} onChange={e => setNoteForm({...noteForm, image_url: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-6 pt-4 border-t">
+                <button onClick={handleSubmitNote} className="flex-1 bg-[#C20C0C] text-white text-[13px] py-2 font-bold hover:bg-[#A30A0A] transition-colors">同步至本地知识库</button>
+                <button onClick={() => setShowEditor(false)} className="px-6 bg-[#F5F5F5] text-[#666] text-[13px] py-2 border hover:bg-[#EAEAEA] transition-colors">取消</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </main>
+
+      <footer className="bg-[#F2F2F2] border-t border-[#D3D3D3] py-12 text-center text-[12px] text-[#999]">
+        <p>SCENE KNOWLEDGE INTELLIGENCE SYSTEM V1.0</p>
+      </footer>
     </div>
   );
 }
