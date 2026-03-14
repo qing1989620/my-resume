@@ -2,7 +2,8 @@
 import { useState, useEffect, useRef } from 'react';
 
 // --- ☁️ 全局配置：请确保此地址指向你的 Python 后端 ---
-const API_BASE_URL = "http://127.0.0.1:8000";
+// 确保就是你刚才看到 "Not Found" 的那个网址
+const API_BASE_URL = "https://qing2976-scene-knowledge-api.hf.space";
 
 export default function Dashboard() {
   // --- [1] 核心路由与弹窗状态 ---
